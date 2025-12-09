@@ -128,9 +128,23 @@ export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: Camera
           return;
         }
 
-        // Initialize FaceMesh with production-ready CDN
-        const faceMesh = new FaceMesh({
-          locateFile: (file) => {
+        // Wait for MediaPipe to load from CDN
+        let attempts = 0;
+        while (!(window as any).FaceMesh && attempts < 50) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+          attempts++;
+        }
+
+        if (!(window as any).FaceMesh) {
+          setError('Failed to load face detection library. Please refresh the page.');
+          setIsLoading(false);
+          return;
+        }
+
+        // Use the global FaceMesh constructor
+        const FaceMeshConstructor = (window as any).FaceMesh;
+        const faceMesh = new FaceMeshConstructor({
+          locateFile: (file: string) => {
             // Use specific version for better reliability in production
             return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`;
           },
@@ -174,7 +188,8 @@ export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: Camera
 
         // Initialize camera with MediaPipe
         if (videoRef.current) {
-          const camera = new Camera(videoRef.current, {
+          const CameraConstructor = (window as any).Camera;
+          const camera = new CameraConstructor(videoRef.current, {
             onFrame: async () => {
               if (faceMeshRef.current && videoRef.current) {
                 await faceMeshRef.current.send({ image: videoRef.current });
