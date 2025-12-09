@@ -117,10 +117,11 @@ export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: Camera
         setIsLoading(true);
         setError(null);
 
-        // Initialize FaceMesh
+        // Initialize FaceMesh with production-ready CDN
         const faceMesh = new FaceMesh({
           locateFile: (file) => {
-            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
+            // Use unpkg CDN for better reliability in production
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`;
           },
         });
 
