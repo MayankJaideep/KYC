@@ -1,9 +1,33 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import * as FaceMeshLib from '@mediapipe/face_mesh';
-import { Results } from '@mediapipe/face_mesh';
 import { Camera } from '@mediapipe/camera_utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, Camera as CameraIcon, AlertCircle } from 'lucide-react';
+import { loadScript } from '@/lib/script-loader';
+
+// Define types for the global FaceMesh
+interface FaceMeshOptions {
+  locateFile: (file: string) => string;
+}
+
+interface FaceMeshConfig {
+  maxNumFaces: number;
+  refineLandmarks: boolean;
+  minDetectionConfidence: number;
+  minTrackingConfidence: number;
+}
+
+interface FaceMesh {
+  setOptions: (options: FaceMeshConfig) => void;
+  onResults: (callback: (results: any) => void) => void;
+  send: (input: { image: HTMLVideoElement }) => Promise<void>;
+  close: () => Promise<void>;
+}
+
+declare global {
+  interface Window {
+    FaceMesh: new (options?: FaceMeshOptions) => FaceMesh;
+  }
+}
 
 interface Point3D {
   x: number;
@@ -20,8 +44,7 @@ interface CameraFeedProps {
 export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: CameraFeedProps) {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  // Use FaceMeshLib.FaceMesh for the type if available, otherwise any for now to be safe during debug
-  const faceMeshRef = useRef<FaceMeshLib.FaceMesh | null>(null);
+  const faceMeshRef = useRef<FaceMesh | null>(null);
   const cameraRef = useRef<Camera | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
@@ -86,13 +109,13 @@ export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: Camera
     ctx.stroke();
   }, [showMesh]);
 
-  const onResults = useCallback((results: Results) => {
+  const onResults = useCallback((results: any) => {
     if (!canvasRef.current) return;
 
     const canvas = canvasRef.current;
 
     if (results.multiFaceLandmarks && results.multiFaceLandmarks.length > 0) {
-      const landmarks = results.multiFaceLandmarks[0].map(l => ({
+      const landmarks = results.multiFaceLandmarks[0].map((l: any) => ({
         x: l.x,
         y: l.y,
         z: l.z,
@@ -120,21 +143,30 @@ export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: Camera
         setError(null);
         setCameraPermissionDenied(false);
 
+        // Check if getUserMedia is supported
         if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
           setError('Camera not supported in this browser');
           setIsLoading(false);
           return;
         }
 
-        console.log('FaceMeshLib exports:', FaceMeshLib);
-        // Explicitly access FaceMesh from the namespace object
-        const FaceMeshConstructor = FaceMeshLib.FaceMesh;
-        if (!FaceMeshConstructor) {
-          console.error('FaceMesh constructor not found in exports:', FaceMeshLib);
-          throw new Error('FaceMesh constructor is missing');
+        // Load FaceMesh from CDN
+        try {
+          await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js');
+        } catch (loadErr) {
+          console.error('Failed to load FaceMesh script:', loadErr);
+          setError('Failed to load biometric library. Please check your connection.');
+          setIsLoading(false);
+          return;
         }
 
-        const faceMesh = new FaceMeshConstructor({
+        if (!window.FaceMesh) {
+          setError('FaceMesh library failed to initialize unexpectedly.');
+          setIsLoading(false);
+          return;
+        }
+
+        const faceMesh = new window.FaceMesh({
           locateFile: (file) => {
             return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`;
           },
