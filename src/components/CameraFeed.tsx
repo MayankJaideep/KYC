@@ -1,12 +1,17 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
-import { Camera } from '@mediapipe/camera_utils';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, Camera as CameraIcon, AlertCircle } from 'lucide-react';
 import { loadScript } from '@/lib/script-loader';
 
-// Define types for the global FaceMesh
+// Define types for global MediaPipe libraries
 interface FaceMeshOptions {
   locateFile: (file: string) => string;
+}
+
+interface CameraOptions {
+  onFrame: () => Promise<void>;
+  width: number;
+  height: number;
 }
 
 interface FaceMeshConfig {
@@ -23,9 +28,15 @@ interface FaceMesh {
   close: () => Promise<void>;
 }
 
+interface CameraImpl {
+  start: () => Promise<void>;
+  stop: () => void;
+}
+
 declare global {
   interface Window {
     FaceMesh: new (options?: FaceMeshOptions) => FaceMesh;
+    Camera: new (video: HTMLVideoElement, options: CameraOptions) => CameraImpl;
   }
 }
 
@@ -45,7 +56,7 @@ export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: Camera
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const faceMeshRef = useRef<FaceMesh | null>(null);
-  const cameraRef = useRef<Camera | null>(null);
+  const cameraRef = useRef<CameraImpl | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -150,18 +161,21 @@ export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: Camera
           return;
         }
 
-        // Load FaceMesh from CDN
+        // Load MediaPipe scripts from CDN
         try {
-          await loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js');
+          await Promise.all([
+            loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/face_mesh.js'),
+            loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.js')
+          ]);
         } catch (loadErr) {
-          console.error('Failed to load FaceMesh script:', loadErr);
-          setError('Failed to load biometric library. Please check your connection.');
+          console.error('Failed to load biometric libraries:', loadErr);
+          setError('Failed to load required libraries. Please check your connection.');
           setIsLoading(false);
           return;
         }
 
-        if (!window.FaceMesh) {
-          setError('FaceMesh library failed to initialize unexpectedly.');
+        if (!window.FaceMesh || !window.Camera) {
+          setError('Biometric libraries failed to initialize.');
           setIsLoading(false);
           return;
         }
@@ -208,9 +222,9 @@ export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: Camera
           return;
         }
 
-        // Initialize camera with MediaPipe
+        // Initialize camera with MediaPipe Camera Utils
         if (videoRef.current) {
-          const camera = new Camera(videoRef.current, {
+          const camera = new window.Camera(videoRef.current, {
             onFrame: async () => {
               if (faceMeshRef.current && videoRef.current) {
                 await faceMeshRef.current.send({ image: videoRef.current });
