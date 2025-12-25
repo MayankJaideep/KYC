@@ -1,4 +1,7 @@
+// Reverting changes
 export type ChallengeType = 'blink' | 'turn_left' | 'turn_right' | 'look_up' | 'look_down' | 'smile' | 'nod';
+
+import { DeviceTrustMetrics } from './device-trust';
 
 export interface Challenge {
   id: string;
@@ -15,6 +18,7 @@ export interface VerificationResult {
   challenges: Challenge[];
   spoofDetected: boolean;
   spoofType?: 'photo' | 'video' | 'mask' | 'deepfake';
+  deviceTrust?: DeviceTrustMetrics;
   timestamp: Date;
 }
 
@@ -27,6 +31,13 @@ export interface FaceMetrics {
   faceConfidence: number;
   isBlinking: boolean;
   isSmiling: boolean;
+  // Environment analysis
+  brightness?: number; // 0-1, normalized brightness
+  isLowLight?: boolean;
+  textureVariance?: number; // For spoof detection
+  isSpoof?: boolean;
+  aiProbability?: number; // 0-1, likelihood of being real from ONNX model
+  distance?: 'too-far' | 'too-close' | 'optimal';
 }
 
 export interface LivenessState {
@@ -37,6 +48,7 @@ export interface LivenessState {
   faceDetected: boolean;
   faceMetrics: FaceMetrics | null;
   holdProgress?: number; // 0-100, tracks hold duration for progress bar
+  deviceTrust?: DeviceTrustMetrics;
 }
 
 export const CHALLENGES: Omit<Challenge, 'id' | 'completed' | 'score'>[] = [

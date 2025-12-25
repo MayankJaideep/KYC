@@ -159,7 +159,7 @@ const THRESHOLDS = {
   blinkEAROpen: 0.22, // Eyes are open when EAR is above this
   smileMouthRatio: 0.08, // Smile detected when outer mouth ratio exceeds this
   smileWidthIncrease: 1.15, // Or when mouth width increases by this factor
-  headTurnYaw: 8, // Degrees for head turn detection (lowered for better detection)
+  headTurnYaw: 25, // Required degrees for head turn (increased to prevent false positives)
   headTurnPitch: 6, // Degrees for look up/down detection (lowered for better sensitivity)
   nodThreshold: 10, // Degrees change for nod detection
 };
@@ -298,29 +298,69 @@ export function calculateDepthVariance(landmarks: Point3D[]): number {
   return Math.sqrt(variance);
 }
 
-export function detectLighting(landmarks: Point3D[]): {
+// Check if face is properly positioned
+export function checkFacePosition(landmarks: Point3D[]): 'too-far' | 'too-close' | 'optimal' {
+  const leftCheek = landmarks[234];
+  const rightCheek = landmarks[454];
+
+  // Calculate face width relative to frame (normalized coordinates 0-1)
+  const faceWidth = Math.abs(rightCheek.x - leftCheek.x);
+
+  if (faceWidth < 0.25) return 'too-far';
+  if (faceWidth > 0.8) return 'too-close';
+  return 'optimal';
+}
+export function detectLighting(landmarks?: Point3D[], imageData?: ImageData): {
   isLowLight: boolean;
   brightness: number;
 } {
-  // Use z-coordinate variance as proxy for lighting quality
-  // Well-lit faces have more consistent depth detection
-  const variance = calculateDepthVariance(landmarks);
-  const brightness = Math.min(1, variance * 100);
+  // If we have actual image data, use pixel analysis (much more accurate)
+  if (imageData) {
+    const data = imageData.data;
+    let totalBrightness = 0;
+    // Sample pixels (every 4th pixel for performance)
+    let samples = 0;
+    for (let i = 0; i < data.length; i += 16) {
+      // Perceived brightness formula (0.299R + 0.587G + 0.114B)
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      totalBrightness += (0.299 * r + 0.587 * g + 0.114 * b);
+      samples++;
+    }
 
-  return {
-    isLowLight: brightness < 0.3,
-    brightness
-  };
+    // Normalize to 0-1 range (255 is max brightness)
+    const avgBrightness = (totalBrightness / samples) / 255;
+
+    return {
+      isLowLight: avgBrightness < 0.3, // Threshold for low light
+      brightness: avgBrightness
+    };
+  }
+
+  // Fallback to z-variance if no image data (legacy method)
+  if (landmarks) {
+    const variance = calculateDepthVariance(landmarks);
+    const brightness = Math.min(1, variance * 100);
+    return {
+      isLowLight: brightness < 0.3,
+      brightness
+    };
+  }
+
+  return { isLowLight: false, brightness: 1 };
 }
 
 const SPOOFING_THRESHOLDS = {
   minDepthVariance: 0.008, // Real faces have higher depth variance
   minMotionScore: 0.3,     // Real faces have natural micro-movements
+  minTextureVariance: 3.5, // Screens have lower texture variance (blur/moiré)
 };
 
 export function analyzeSpoofing(
   depthVariance: number,
-  motionHistory: number[]
+  motionHistory: number[],
+  textureVariance?: number
 ): { isSpoofing: boolean; confidence: number; reason?: string } {
   if (motionHistory.length < 10) {
     return { isSpoofing: false, confidence: 0 };
@@ -331,13 +371,22 @@ export function analyzeSpoofing(
   const depthScore = depthVariance > SPOOFING_THRESHOLDS.minDepthVariance ? 1 : 0;
   const motionScore = avgMotion > SPOOFING_THRESHOLDS.minMotionScore ? 1 : 0;
 
-  const livenessConfidence = (depthScore + motionScore) / 2;
+  // Texture analysis (screens look "smoother" or have lattice patterns)
+  // Real skin has pores/imperfections => higher local variance
+  let textureScore = 1;
+  if (textureVariance !== undefined) {
+    textureScore = textureVariance > SPOOFING_THRESHOLDS.minTextureVariance ? 1 : 0;
+  }
+
+  // Weighted confidence
+  const livenessConfidence = (depthScore + motionScore + textureScore) / (textureVariance !== undefined ? 3 : 2);
   const spoofingConfidence = 1 - livenessConfidence;
 
   let reason: string | undefined;
   if (spoofingConfidence > 0.5) {
     if (depthScore === 0) reason = 'Flat surface detected (possible photo/screen)';
     else if (motionScore === 0) reason = 'No natural movement detected';
+    else if (textureScore === 0) reason = 'Unnatural texture detected (possible screen)';
   }
 
   return {

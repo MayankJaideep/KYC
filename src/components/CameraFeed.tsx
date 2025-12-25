@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Loader2, Camera as CameraIcon, AlertCircle } from 'lucide-react';
+import { loadScript } from '@/lib/script-loader';
 
 // Types for the dynamically imported libraries
 // We use 'any' here for simplicity to avoid complex type merging from the dynamic import, 
@@ -15,7 +16,7 @@ interface Point3D {
 }
 
 interface CameraFeedProps {
-  onFaceDetected: (landmarks: Point3D[], confidence: number) => void;
+  onFaceDetected: (landmarks: Point3D[], confidence: number, imageData?: ImageData) => void;
   isActive: boolean;
   showMesh?: boolean;
 }
@@ -102,14 +103,28 @@ export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: Camera
 
       setFaceDetected(true);
       drawFaceMesh(landmarks, canvas);
-      onFaceDetected(landmarks, 1);
+
+      // Extract image data for lighting/texture analysis if context is available
+      const ctx = canvas.getContext('2d');
+      let imageData: ImageData | undefined;
+      if (ctx) {
+        // Only sample the center area or face bounding box ideally, but full frame is okay for now
+        // heavily optimized: read only small part if needed, but let's send full frame for `analyzeTextureVariance` loops
+        try {
+          imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        } catch (e) {
+          console.warn("Failed to get image data", e);
+        }
+      }
+
+      onFaceDetected(landmarks, 1, imageData);
     } else {
       setFaceDetected(false);
       const ctx = canvas.getContext('2d');
       if (ctx) {
         ctx.clearRect(0, 0, canvas.width, canvas.height);
       }
-      onFaceDetected([], 0);
+      onFaceDetected([], 0, undefined);
     }
   }, [onFaceDetected, drawFaceMesh]);
 
@@ -133,38 +148,42 @@ export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: Camera
           return;
         }
 
-        console.log('Starting dynamic imports...');
+        console.log('Loading MediaPipe scripts...');
 
-        // Dynamically import libraries to prevent SSR/Bundler issues
-        // This ensures code only runs in the browser
-        const [faceMeshModule, cameraModule] = await Promise.all([
-          import('@mediapipe/face_mesh'),
-          import('@mediapipe/camera_utils')
-        ]);
+        try {
+          // Load scripts from CDN
+          await Promise.all([
+            loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/face_mesh.js'),
+            loadScript('https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js')
+          ]);
+        } catch (scriptErr) {
+          console.error('Failed to load MediaPipe scripts:', scriptErr);
+          throw new Error('Failed to load face detection libraries. Please check your internet connection.');
+        }
 
         if (!isMounted) return;
 
-        console.log('Dynamic imports loaded');
+        console.log('Scripts loaded');
 
-        // Extract constructors
-        const FaceMesh = faceMeshModule.FaceMesh;
-        const Camera = cameraModule.Camera;
+        // Access globals
+        const FaceMesh = window.FaceMesh;
+        const Camera = window.Camera;
 
         if (!FaceMesh || !Camera) {
-          throw new Error('Failed to extract FaceMesh or Camera constructors from imported modules');
+          throw new Error('FaceMesh or Camera not found in global scope');
         }
 
         const faceMesh = new FaceMesh({
-          locateFile: (file) => {
-            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh@0.4.1633559619/${file}`;
+          locateFile: (file: string) => {
+            return `https://cdn.jsdelivr.net/npm/@mediapipe/face_mesh/${file}`;
           },
         });
 
         faceMesh.setOptions({
           maxNumFaces: 1,
           refineLandmarks: true,
-          minDetectionConfidence: 0.3,
-          minTrackingConfidence: 0.3,
+          minDetectionConfidence: 0.5,
+          minTrackingConfidence: 0.5,
         });
 
         faceMesh.onResults(onResults);
@@ -220,7 +239,7 @@ export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: Camera
         console.error('Error initializing camera:', err);
         if (isMounted) {
           if (err instanceof Error) {
-            setError('Failed to initialize camera: ' + err.message);
+            setError(err.message);
           } else {
             setError('Failed to initialize camera');
           }
@@ -233,13 +252,27 @@ export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: Camera
 
     return () => {
       isMounted = false;
-      if (cameraRef.current) {
-        // cameraRef.current.stop(); // Warning: .stop() might not be on the instance types depending on version, check docs
-        // Use a safe check if needed, or trust the type
-        (cameraRef.current as any).stop?.();
+      // Cleanup
+      if (videoRef.current && videoRef.current.srcObject) {
+        const stream = videoRef.current.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
       }
+
+      // Attempt safe stop
+      if (cameraRef.current) {
+        try {
+          cameraRef.current.stop();
+        } catch (e) {
+          console.warn("Error stopping camera instance", e);
+        }
+      }
+
       if (faceMeshRef.current) {
-        faceMeshRef.current.close();
+        try {
+          faceMeshRef.current.close();
+        } catch (e) {
+          console.warn("Error closing faceMesh", e);
+        }
       }
     };
   }, [isActive, onResults]);

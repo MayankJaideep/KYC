@@ -2,16 +2,17 @@ import React from 'react';
 import { motion } from 'framer-motion';
 import { Button } from '@/components/ui/button';
 import { CheckCircle2, XCircle, RefreshCw, Shield, AlertTriangle } from 'lucide-react';
-import { Challenge } from '@/lib/liveness-types';
+import { Challenge, DeviceTrustMetrics } from '@/lib/liveness-types';
 
 interface VerificationResultProps {
   success: boolean;
   confidence: number;
   challenges: Challenge[];
+  deviceTrust?: DeviceTrustMetrics;
   onRetry: () => void;
 }
 
-export function VerificationResult({ success, confidence, challenges, onRetry }: VerificationResultProps) {
+export function VerificationResult({ success, confidence, challenges, deviceTrust, onRetry }: VerificationResultProps) {
   const confidencePercent = Math.round(confidence * 100);
 
   return (
@@ -94,6 +95,43 @@ export function VerificationResult({ success, confidence, challenges, onRetry }:
             {confidencePercent}%
           </span>
         </motion.div>
+
+        {/* Device Trust Scorecard */}
+        {deviceTrust && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            transition={{ delay: 0.35 }}
+            className="mb-8 rounded-xl bg-card/50 border border-primary/10 overflow-hidden"
+          >
+            <div className="p-4 bg-primary/5 flex items-center justify-between">
+              <span className="text-sm font-medium">Device Trust Score</span>
+              <span className={`text-lg font-bold font-mono ${deviceTrust.trustScore > 80 ? 'text-success' : 'text-warning'}`}>
+                {deviceTrust.trustScore}/100
+              </span>
+            </div>
+            <div className="p-4 space-y-2 text-xs">
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Bot Detection</span>
+                <span className={!deviceTrust.isBot ? 'text-success' : 'text-destructive'}>
+                  {!deviceTrust.isBot ? 'Passed' : 'Failed'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Screen Integrity</span>
+                <span className={deviceTrust.screenPropertiesValid ? 'text-success' : 'text-destructive'}>
+                  {deviceTrust.screenPropertiesValid ? 'Verified' : 'Abnormal'}
+                </span>
+              </div>
+              <div className="flex justify-between items-center">
+                <span className="text-muted-foreground">Platform Check</span>
+                <span className={!deviceTrust.platformMismatch ? 'text-success' : 'text-destructive'}>
+                  {!deviceTrust.platformMismatch ? 'Consistent' : 'Mismatch'}
+                </span>
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {/* Challenge results */}
         <motion.div

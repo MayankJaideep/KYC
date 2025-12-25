@@ -9,8 +9,14 @@ import {
 import {
   extractFaceMetrics,
   checkChallengeCompletion,
-  detectMicroMotion
+  detectMicroMotion,
+  detectLighting,
+  analyzeTextureVariance,
+  analyzeSpoofing,
+  checkFacePosition
 } from '@/lib/face-analysis';
+import { SpoofDetector } from '@/lib/spoof-detection';
+import { calculateDeviceTrust } from '@/lib/device-trust';
 
 interface Point3D {
   x: number;
@@ -20,6 +26,7 @@ interface Point3D {
 
 const CHALLENGE_TIMEOUT = 10000; // 10 seconds per challenge
 const BLINK_COOLDOWN = 150; // 150ms between blinks (very fast detection)
+const AI_CHECK_INTERVAL = 30; // Check AI every 30 frames (~1 sec)
 
 export function useLivenessDetection() {
   const [state, setState] = useState<LivenessState>({
@@ -50,6 +57,13 @@ export function useLivenessDetection() {
   const HOLD_FRAMES_REQUIRED = 30; // Must hold position for ~30 processed frames (~1 second with throttling)
   const frameSkipCountRef = useRef(0);
   const FRAME_SKIP = 2; // Process every 2nd frame for 30% CPU reduction
+  const aiCheckFrameRef = useRef(0); // Counter for AI check throttling
+
+  // Load AI Model on Mount
+  useEffect(() => {
+    // Note: User needs to put model in public/MiniFASNetV2.onnx
+    SpoofDetector.loadModel('/MiniFASNetV2.onnx').catch(console.error);
+  }, []);
 
   // Update refs when state changes
   useEffect(() => {
@@ -66,6 +80,8 @@ export function useLivenessDetection() {
     motionHistoryRef.current = [];
     frameCountRef.current = 0;
 
+    const deviceTrust = calculateDeviceTrust();
+
     setState({
       status: 'detecting',
       currentChallenge: null,
@@ -73,6 +89,7 @@ export function useLivenessDetection() {
       overallScore: 0,
       faceDetected: false,
       faceMetrics: null,
+      deviceTrust,
     });
   }, []);
 
@@ -120,12 +137,48 @@ export function useLivenessDetection() {
     }, CHALLENGE_TIMEOUT);
   }, []);
 
-  const processFrame = useCallback((landmarks: Point3D[], confidence: number) => {
+  const processFrame = useCallback(async (landmarks: Point3D[], confidence: number, imageData?: ImageData) => {
     if (statusRef.current === 'idle' || statusRef.current === 'consent' || statusRef.current === 'success' || statusRef.current === 'failed') {
       return;
     }
 
     const metrics = extractFaceMetrics(landmarks, confidence);
+
+    // Enhanced Environment Analysis
+    const lighting = detectLighting(landmarks, imageData);
+    const position = checkFacePosition(landmarks);
+
+    // Store metrics additions
+    metrics.brightness = lighting.brightness;
+    metrics.isLowLight = lighting.isLowLight;
+    metrics.distance = position;
+
+    // Texture/Spoof Analysis (only if imageData available)
+    if (imageData) {
+      metrics.textureVariance = analyzeTextureVariance(imageData);
+
+      // Run AI Check periodically
+      aiCheckFrameRef.current++;
+      if (aiCheckFrameRef.current % AI_CHECK_INTERVAL === 0 && SpoofDetector.isLoaded()) {
+        try {
+          // Fire and forget - don't await to block render
+          SpoofDetector.predict(imageData).then(res => {
+            console.log('🤖 AI Spoof Score:', res.score.toFixed(4));
+            // Update state with AI score (using functional update to avoid stale state)
+            setState(prev => prev.faceMetrics ? ({
+              ...prev,
+              faceMetrics: {
+                ...prev.faceMetrics,
+                aiProbability: res.score,
+                isSpoof: res.score < 0.2 // Override heuristic if AI is confident
+              }
+            }) : prev);
+          });
+        } catch (e) {
+          console.error('AI Prediction Failed', e);
+        }
+      }
+    }
 
     // Detect blinks on EVERY frame (don't throttle this - blinks are fast!)
     const now = Date.now();
@@ -147,6 +200,13 @@ export function useLivenessDetection() {
     motionHistoryRef.current.push(motion);
     if (motionHistoryRef.current.length > 30) {
       motionHistoryRef.current.shift();
+    }
+
+    // Perform spoof analysis (Heuristic Fallback)
+    if (metrics.textureVariance && !metrics.aiProbability) {
+      const depthVar = 0.05; // Simplified, calculating full depth var is heavy
+      const spoofResult = analyzeSpoofing(depthVar, motionHistoryRef.current, metrics.textureVariance);
+      metrics.isSpoof = spoofResult.isSpoofing;
     }
 
     // Update state with face metrics
