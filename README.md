@@ -1,73 +1,121 @@
-# Welcome to your Lovable project
+# Liveness Detection with Anti-Spoofing
 
-## Project info
+A robust, real-time liveness detection system that verifies the presence of a live person using facial analysis and AI-powered anti-spoofing techniques.
 
-**URL**: https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID
+## 🚀 Features
 
-## How can I edit this code?
+- **Multi-Challenge Liveness Verification**
+  - Blink detection
+  - Head movement tracking (left/right/up/down)
+  - Smile detection
+  - Nod detection
 
-There are several ways of editing your application.
+- **Advanced Anti-Spoofing**
+  - AI-powered spoof detection using MiniFASNetV2
+  - Texture analysis to detect screens/prints
+  - Motion analysis for natural movement detection
+  - 3D face landmark analysis
+  - Lighting condition assessment
 
-**Use Lovable**
+- **User Experience**
+  - Real-time feedback
+  - Clear visual instructions
+  - Progress indicators
+  - Responsive design
 
-Simply visit the [Lovable Project](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and start prompting.
+## 🛠 Tech Stack
 
-Changes made via Lovable will be committed automatically to this repo.
+- **Frontend**: React 18, TypeScript, Vite
+- **UI**: TailwindCSS, shadcn/ui, Framer Motion
+- **Face Detection**: MediaPipe Face Mesh
+- **AI**: ONNX Runtime with MiniFASNetV2
+- **State Management**: React Query, React Hook Form
+- **Build Tools**: Vite, TypeScript, ESLint
 
-**Use your preferred IDE**
+## 🚀 Getting Started
 
-If you want to work locally using your own IDE, you can clone this repo and push changes. Pushed changes will also be reflected in Lovable.
+### Prerequisites
 
-The only requirement is having Node.js & npm installed - [install with nvm](https://github.com/nvm-sh/nvm#installing-and-updating)
+- Node.js 16+
+- npm 7+ or yarn 1.22+
+- Webcam access
 
-Follow these steps:
+### Installation
 
-```sh
-# Step 1: Clone the repository using the project's Git URL.
-git clone <YOUR_GIT_URL>
+1. Clone the repository:
+   ```bash
+   git clone https://github.com/MayankJaideep/LivelinessDetection.git
+   cd LivelinessDetection
+   ```
 
-# Step 2: Navigate to the project directory.
-cd <YOUR_PROJECT_NAME>
+2. Install dependencies:
+   ```bash
+   npm install
+   # or
+   yarn
+   ```
 
-# Step 3: Install the necessary dependencies.
-npm i
+3. Download the ONNX model:
+   - Place `MiniFASNetV2.onnx` in the `public/` directory
+   - The model will be automatically loaded when the app starts
 
-# Step 4: Start the development server with auto-reloading and an instant preview.
-npm run dev
+4. Start the development server:
+   ```bash
+   npm run dev
+   # or
+   yarn dev
+   ```
+
+5. Open [http://localhost:5173](http://localhost:5173) in your browser
+
+## 🎮 Usage
+
+1. Click "Start Verification" to begin
+2. Grant camera permissions when prompted
+3. Follow the on-screen instructions to complete the liveness challenges
+4. The system will analyze your responses and provide a liveness score
+
+## ⚙️ Configuration
+
+Environment variables can be configured in `.env.local`:
+
+```env
+VITE_APP_NAME="Liveness Detection"
+# Add other configuration as needed
 ```
 
-**Edit a file directly in GitHub**
+## 🏗 Building for Production
 
-- Navigate to the desired file(s).
-- Click the "Edit" button (pencil icon) at the top right of the file view.
-- Make your changes and commit the changes.
+To create a production build:
 
-**Use GitHub Codespaces**
+```bash
+npm run build
+# or
+yarn build
+```
 
-- Navigate to the main page of your repository.
-- Click on the "Code" button (green button) near the top right.
-- Select the "Codespaces" tab.
-- Click on "New codespace" to launch a new Codespace environment.
-- Edit files directly within the Codespace and commit and push your changes once you're done.
+The build artifacts will be stored in the `dist/` directory.
 
-## What technologies are used for this project?
+## 🚀 Deployment
 
-This project is built with:
+The project is configured for deployment on Vercel. You can deploy by:
 
-- Vite
-- TypeScript
-- React
-- shadcn-ui
-- Tailwind CSS
+1. Pushing to the `main` branch (auto-deploy)
+2. Using Vercel CLI:
+   ```bash
+   vercel
+   ```
 
-## How can I deploy this project?
+## 🤝 Contributing
 
-Simply open [Lovable](https://lovable.dev/projects/REPLACE_WITH_PROJECT_ID) and click on Share -> Publish.
+Contributions are welcome! Please feel free to submit a Pull Request.
 
-## Can I connect a custom domain to my Lovable project?
+## 📄 License
 
-Yes, you can!
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
-To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
+## 🙏 Acknowledgements
 
-Read more here: [Setting up a custom domain](https://docs.lovable.dev/features/custom-domain#custom-domain)
+- MediaPipe for the face mesh model
+- MiniFASNetV2 authors for the anti-spoofing model
+- The open-source community for various libraries and tools
