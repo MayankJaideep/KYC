@@ -116,11 +116,8 @@ We welcome contributions from the community! Please read our [Contributing Guide
 4. Push to the branch (`git push origin feature/amazing-feature`)
 5. Open a Pull Request
 
-Please make sure to update tests as appropriate and ensure all tests pass before submitting your PR.
+Please make sure to update tests as appropriate and ensure all tests pass before submitting your PR
 
-## 📄 License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🙏 Acknowledgements
 
