@@ -16,11 +16,6 @@ export class SpoofDetector {
             isLoading = true;
             console.log('Loading AI Model from:', modelUrl);
 
-            // Set wasm path (critical for Vite/Vercel)
-            ort.env.wasm.numThreads = 1;
-            // Note: User must verify where wasm files are served from
-            // Usually defaults are fine, but in some setups we might need to set standard paths
-
             session = await ort.InferenceSession.create(modelUrl, {
                 executionProviders: ['wasm'],
                 graphOptimizationLevel: 'all'

@@ -142,6 +142,16 @@ export function useLivenessDetection() {
       return;
     }
 
+    if (!landmarks || landmarks.length < 468 || confidence <= 0) {
+      setState(prev => ({
+        ...prev,
+        faceDetected: false,
+        faceMetrics: null,
+        holdProgress: 0,
+      }));
+      return;
+    }
+
     const metrics = extractFaceMetrics(landmarks, confidence);
 
     // Enhanced Environment Analysis

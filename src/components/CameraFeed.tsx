@@ -26,6 +26,7 @@ export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: Camera
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const faceMeshRef = useRef<any>(null); // Keeping as any for the dynamic instance
   const cameraRef = useRef<any>(null);   // Keeping as any for the dynamic instance
+  const captureCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -102,21 +103,26 @@ export function CameraFeed({ onFaceDetected, isActive, showMesh = true }: Camera
       }));
 
       setFaceDetected(true);
-      drawFaceMesh(landmarks, canvas);
 
-      // Extract image data for lighting/texture analysis if context is available
-      const ctx = canvas.getContext('2d');
       let imageData: ImageData | undefined;
-      if (ctx) {
-        // Only sample the center area or face bounding box ideally, but full frame is okay for now
-        // heavily optimized: read only small part if needed, but let's send full frame for `analyzeTextureVariance` loops
+      if (!captureCanvasRef.current) {
+        captureCanvasRef.current = document.createElement('canvas');
+      }
+      const captureCanvas = captureCanvasRef.current;
+      captureCanvas.width = canvas.width;
+      captureCanvas.height = canvas.height;
+
+      const captureCtx = captureCanvas.getContext('2d');
+      if (captureCtx && results.image) {
         try {
-          imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          captureCtx.drawImage(results.image, 0, 0, captureCanvas.width, captureCanvas.height);
+          imageData = captureCtx.getImageData(0, 0, captureCanvas.width, captureCanvas.height);
         } catch (e) {
-          console.warn("Failed to get image data", e);
+          console.warn('Failed to capture image data', e);
         }
       }
 
+      drawFaceMesh(landmarks, canvas);
       onFaceDetected(landmarks, 1, imageData);
     } else {
       setFaceDetected(false);
