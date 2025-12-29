@@ -1,0 +1,37 @@
+{
+    "version": "1.0.0",
+    "models": [
+        {
+            "name": "blazeface",
+            "version": "1.0.0",
+            "path": "/models/onnx/blazeface.onnx",
+            "size": 535842,
+            "description": "BlazeFace face detection model (from garavv/blazeface-onnx)",
+            "lastUpdated": "2025-12-28T14:02:00.000Z"
+        },
+        {
+            "name": "minifasnet_v2",
+            "version": "1.0.0",
+            "path": "/models/onnx/minifasnet_v2.onnx",
+            "size": 0,
+            "description": "MiniFASNetV2 liveness detection model (MISSING/INVALID - Needs manual conversion)",
+            "lastUpdated": "2025-12-28T13:54:00.000Z"
+        },
+        {
+            "name": "resnet50_arcface",
+            "version": "1.0.0",
+            "path": "/models/onnx/resnet50_arcface.onnx",
+            "size": 136704000,
+            "description": "High-accuracy ArcFace face recognition model (from garavv/arcface-onnx)",
+            "lastUpdated": "2025-12-28T14:02:00.000Z"
+        },
+        {
+            "name": "mobilefacenet_arcface",
+            "version": "1.0.0",
+            "path": "/models/onnx/mobilefacenet_arcface.onnx",
+            "size": 42000000,
+            "description": "Optimized face recognition model (ResNet100 base)",
+            "lastUpdated": "2025-12-28T14:06:00.000Z"
+        }
+    ]
+}

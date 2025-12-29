@@ -106,7 +106,7 @@ export class FaceMatcher {
 
     // Detect face and compute descriptor
     // We use SSD MobileNet for high accuracy with strict confidence threshold
-    const options = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.8 });
+    const options = new faceapi.SsdMobilenetv1Options({ minConfidence: 0.9 });
     const detection = await faceapi.detectSingleFace(input, options)
       .withFaceLandmarks()
       .withFaceDescriptor();

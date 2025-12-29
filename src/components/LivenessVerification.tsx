@@ -36,10 +36,10 @@ interface Point3D {
   z: number;
 }
 
-type Phase = 'system' | 'consent' | 'liveness' | 'result';
+type Phase = 'system' | 'consent' | 'document' | 'liveness' | 'result';
 
 const FACE_MODEL_URL = 'face-api.js'; // Placeholder, actual loading handles multiple files
-const MATCH_THRESHOLD = 0.6; // 0.6 Similarity (Quadratic distance) is the new threshold
+const MATCH_THRESHOLD = 0.55; // 0.55 Similarity threshold (55%)
 
 export function LivenessVerification() {
   const { state, startVerification, processFrame, reset } = useLivenessDetection();
@@ -48,10 +48,23 @@ export function LivenessVerification() {
   const [browserIssues, setBrowserIssues] = useState<string[] | null>(null);
   const [cameraError, setCameraError] = useState(false);
 
-  const [referenceFile, setReferenceFile] = useState<File | null>(null);
-  const [referencePreviewUrl, setReferencePreviewUrl] = useState<string | null>(null);
-  const [referenceEmbedding, setReferenceEmbedding] = useState<Float32Array | null>(null);
-  const [referenceError, setReferenceError] = useState<string | null>(null);
+  // Reference photo removed - using Aadhaar photo instead
+
+  // Document/Aadhaar state (NEW for KYC)
+  const [documentFile, setDocumentFile] = useState<File | null>(null);
+  const [documentPreviewUrl, setDocumentPreviewUrl] = useState<string | null>(null);
+  const [documentImageData, setDocumentImageData] = useState<ImageData | null>(null);
+  const [aadhaarData, setAadhaarData] = useState<any>(null);
+  const [documentError, setDocumentError] = useState<string | null>(null);
+  const [ocrProcessing, setOcrProcessing] = useState(false);
+  const [manualAadhaarInput, setManualAadhaarInput] = useState('');
+  const [aadhaarValid, setAadhaarValid] = useState<boolean | null>(null);
+  const [showManualInput, setShowManualInput] = useState(false);
+
+  // ONNX Runtime initialization state
+  const [onnxInitialized, setOnnxInitialized] = useState(false);
+  const [onnxInitializing, setOnnxInitializing] = useState(false);
+  const [onnxError, setOnnxError] = useState<string | null>(null);
 
   const [faceModelStatus, setFaceModelStatus] = useState<'idle' | 'loading' | 'loaded' | 'error'>(
     FaceMatcher.isLoaded() ? 'loaded' : 'idle'
@@ -64,6 +77,37 @@ export function LivenessVerification() {
   const [matchStatus, setMatchStatus] = useState<'idle' | 'running' | 'done' | 'error'>('idle');
   const [comparisonResult, setComparisonResult] = useState<FaceComparisonResult | null>(null);
   const [matchError, setMatchError] = useState<string | null>(null);
+
+  // Initialize ONNX Runtime on mount
+  useEffect(() => {
+    const initONNX = async () => {
+      if (onnxInitialized || onnxInitializing) return;
+
+      setOnnxInitializing(true);
+      setOnnxError(null);
+
+      try {
+        console.log('[LivenessVerification] Initializing ONNX Runtime...');
+        const { initializeBiometricSystem } = await import('@/lib/biometric/init');
+
+        const status = await initializeBiometricSystem();
+
+        console.log('[LivenessVerification] ONNX initialized:', status);
+        setOnnxInitialized(true);
+
+        if (!status.webgpuAvailable) {
+          console.warn('[LivenessVerification] WebGPU not available, using WASM (slower)');
+        }
+      } catch (error) {
+        console.error('[LivenessVerification] ONNX initialization failed:', error);
+        setOnnxError(error instanceof Error ? error.message : 'Failed to initialize');
+      } finally {
+        setOnnxInitializing(false);
+      }
+    };
+
+    initONNX();
+  }, []);
 
   useEffect(() => {
     const res = checkBrowserCompatibility();
@@ -113,7 +157,11 @@ export function LivenessVerification() {
   useEffect(() => {
     if (phase !== 'result') return;
     if (state.status !== 'success') return;
-    if (!referenceFile && !referenceEmbedding) return;
+    if (!documentImageData) {
+      // No Aadhaar → show message
+      setMatchError('Please upload Aadhaar card for KYC verification');
+      return;
+    }
     if (!lastGoodFrameRef.current) return;
 
     let cancelled = false;
@@ -124,39 +172,31 @@ export function LivenessVerification() {
       try {
         const liveImage = lastGoodFrameRef.current;
 
-        // Ensure model is ready
-        if (!FaceMatcher.isLoaded()) {
-          const ok = await FaceMatcher.loadModel();
-          if (!ok) throw new Error(FaceMatcher.getLastLoadError() || 'Face comparison model not available');
-        }
+        console.log('[KYC] Using ONNX-based Aadhaar comparison...');
 
-        const landmarks = lastLandmarksRef.current;
-        const region = landmarks && landmarks.length > 0
-          ? estimateFaceRegionFromLandmarks(landmarks.map(p => ({ x: p.x, y: p.y })), liveImage.width, liveImage.height)
-          : centerSquareRegion(liveImage.width, liveImage.height);
+        // Use KYC service with ONNX models
+        const { aadhaarKYCService } = await import('@/lib/document');
 
-        // Compute Live Embedding (Standard Orientation)
-        const liveResult = await FaceMatcher.embeddingFromImage(liveImage, region, false);
-        const liveEmbedding = liveResult.descriptor;
+        const kycResult = await aadhaarKYCService.verifyKYC({
+          aadhaarImage: documentImageData,
+          liveImage: liveImage!,
+          userId: 'user-' + Date.now(),
+          threshold: 0.60
+        });
 
         if (cancelled) return;
 
-        if (referenceEmbedding) {
-          // Precise Cosine Similarity check [0, 1]
-          const score = cosineSimilarity(referenceEmbedding, liveEmbedding);
+        console.log('[KYC] Match:', kycResult.match, 'Similarity:', kycResult.similarity);
 
-          setComparisonResult({
-            match: score >= MATCH_THRESHOLD,
-            similarity: score,
-            confidence: 1.0, // WASM execution confidence
-            reason: score >= MATCH_THRESHOLD
-              ? "High biometric similarity detected between ID and live face."
-              : "Biometric mismatch. Please ensure you are the person in the reference photo."
-          });
-          setMatchStatus('done');
-        } else {
-          throw new Error('Reference embedding not ready');
-        }
+        setComparisonResult({
+          match: kycResult.match,
+          similarity: kycResult.similarity,
+          confidence: kycResult.confidence,
+          reason: kycResult.match
+            ? `✓ Aadhaar photo matches live face (${(kycResult.similarity * 100).toFixed(1)}%)`
+            : kycResult.error || `✗ Mismatch (${(kycResult.similarity * 100).toFixed(1)}%)`
+        });
+        setMatchStatus('done');
       } catch (e) {
         if (cancelled) return;
         console.error('[Verification] Comparison failed:', e);
@@ -168,7 +208,7 @@ export function LivenessVerification() {
     return () => {
       cancelled = true;
     };
-  }, [phase, referenceFile, referenceEmbedding, state.status]);
+  }, [phase, documentImageData, state.status]);
 
   const spoofConfidence = useMemo(() => {
     const metrics = state.faceMetrics;
@@ -200,6 +240,78 @@ export function LivenessVerification() {
     [processFrame]
   );
 
+  // Removed: handleFileChange (old reference photo upload - replaced with Aadhaar)
+
+  // NEW: Handle document upload (Aadhaar)
+  const handleDocumentChange = useCallback(
+    async (e: React.ChangeEvent<HTMLInputElement>) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      setDocumentFile(file);
+      setDocumentError(null);
+
+      const url = URL.createObjectURL(file);
+      setDocumentPreviewUrl(url);
+
+      // Convert to ImageData for processing
+      const img = new Image();
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.drawImage(img, 0, 0);
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          setDocumentImageData(imageData);
+
+          // Process Aadhaar
+          processAadhaar(imageData);
+        }
+      };
+      img.src = url;
+    },
+    []
+  );
+
+  const processAadhaar = async (imageData: ImageData) => {
+    try {
+      const { aadhaarKYCService } = await import('@/lib/document');
+
+      setDocumentError(null);
+      console.log('[UI] Processing Aadhaar with complete KYC service...');
+
+      // Note: At this point we only have the document image
+      // We'll run full verification after liveness check in the result phase
+      // For now, just extract and validate the Aadhaar number
+
+      const { ocrEngine, aadhaarParser } = await import('@/lib/document');
+      const ocrResult = await ocrEngine.extractNumberRegion(imageData);
+      const parseResult = aadhaarParser.parseFromText(ocrResult.text, ocrResult.confidence);
+
+      if (parseResult.success && parseResult.data) {
+        setAadhaarData(parseResult.data);
+        if (!parseResult.data.isValid) {
+          setDocumentError(`Invalid Aadhaar: ${parseResult.error || 'Checksum failed'}`);
+        }
+      } else {
+        setDocumentError(parseResult.error || 'Could not extract Aadhaar number');
+      }
+    } catch (e) {
+      setDocumentError(`Processing failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
+    }
+  };
+
+  const handleConsent = useCallback(() => {
+    setPhase('document'); // Go to document upload first
+  }, []);
+
+  const handleDocumentContinue = useCallback(() => {
+    setPhase('liveness');
+    startVerification();
+  }, [startVerification]);
+
   const startLiveness = useCallback(() => {
     setCameraError(false);
     setMatchStatus('idle');
@@ -217,49 +329,7 @@ export function LivenessVerification() {
     setMatchError(null);
   }, [reset]);
 
-  const loadReferenceImage = useCallback(async (file: File) => {
-    setReferenceError(null);
-    setReferenceEmbedding(null);
-    setReferenceFile(file);
-    setMatchStatus('idle');
-    setComparisonResult(null);
-    setMatchError(null);
-
-    const url = URL.createObjectURL(file);
-    const img = new Image();
-    img.crossOrigin = 'anonymous';
-    img.src = url;
-
-    try {
-      await new Promise<void>((resolve, reject) => {
-        img.onload = () => resolve();
-        img.onerror = () => reject(new Error('Failed to load reference image'));
-      });
-
-      const canvas = document.createElement('canvas');
-      canvas.width = img.naturalWidth || img.width;
-      canvas.height = img.naturalHeight || img.height;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Failed to process image context');
-
-      ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-      const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-      // region is optional now as face-api detects it
-
-      // IMMEDIATE VALIDATION: Check quality before accepting
-      const { descriptor, score } = await FaceMatcher.embeddingFromImage(imageData);
-
-      console.log(`[Reference] Quality Check: Score ${score.toFixed(2)}`);
-
-      setReferenceEmbedding(descriptor);
-      setReferencePreviewUrl(url); // Only set preview if valid
-
-    } catch (e) {
-      setReferenceError(e instanceof Error ? e.message : 'Failed to validate reference photo');
-      URL.revokeObjectURL(url); // Cleanup if invalid
-      setReferencePreviewUrl(null);
-    }
-  }, []);
+  // Removed: loadReferenceImage - using Aadhaar extraction instead
 
   const matchPassed = useMemo(() => {
     if (!comparisonResult) return null;
@@ -275,43 +345,22 @@ export function LivenessVerification() {
       <div className="glass-card-elevated p-6">
         <div className="flex flex-col gap-4">
           <div>
-            <div className="text-sm font-medium text-foreground">Reference Photo</div>
-            <div className="text-xs text-muted-foreground">Upload a clear face photo for comparison after liveness.</div>
+            <div className="text-sm font-medium text-foreground">Aadhaar KYC Verification</div>
+            <div className="text-xs text-muted-foreground">
+              Using ONNX models for secure, offline biometric verification
+            </div>
           </div>
 
-          <div className="flex flex-col gap-3">
-            <div className="space-y-2">
-              <div className="text-sm font-medium text-foreground">Face Comparison Model</div>
-              <div className="text-xs text-muted-foreground">Using face-api.js (SSD MobileNet + ResNet)</div>
-              {faceModelStatus === 'loaded' && <div className="text-xs text-success">Biometric engine ready</div>}
-              {faceModelStatus === 'loading' && <div className="text-xs text-muted-foreground">Loading deep learning models...</div>}
-              {faceModelStatus === 'error' && (
-                <div className="text-xs text-destructive">{faceModelError || 'Model load failed'}</div>
-              )}
+          <div className="bg-blue-50 dark:bg-blue-900/20 p-4 rounded border border-blue-200 dark:border-blue-800">
+            <div className="text-sm font-medium text-blue-900 dark:text-blue-100 mb-2">
+              ✓ Complete KYC Flow:
             </div>
-
-            <Input
-              type="file"
-              accept="image/*"
-              onChange={e => {
-                const f = e.target.files?.[0];
-                if (f) loadReferenceImage(f);
-              }}
-            />
-
-            {referencePreviewUrl && (
-              <div className="rounded-xl overflow-hidden border border-border/50">
-                <img src={referencePreviewUrl} alt="Reference" className="w-full max-h-48 object-contain bg-background" />
-              </div>
-            )}
-
-            {referenceEmbedding && (
-              <div className="text-xs text-success">Reference loaded</div>
-            )}
-
-            {referenceError && (
-              <div className="text-xs text-destructive">{referenceError}</div>
-            )}
+            <ol className="text-xs text-blue-800 dark:text-blue-200 space-y-1 list-decimal list-inside">
+              <li>Upload Aadhaar card → Extract & validate number</li>
+              <li>Extract face photo from Aadhaar</li>
+              <li>Complete liveness challenge → Capture live face</li>
+              <li>Compare Aadhaar photo with live face (ONNX embeddings)</li>
+            </ol>
           </div>
         </div>
       </div>
@@ -327,15 +376,80 @@ export function LivenessVerification() {
 
         {phase === 'consent' && (
           <ConsentDialog
-            onConsent={consented => {
+            onConsent={(consented) => {
               if (!consented) {
                 setPhase('system');
                 return;
               }
-              setPhase('liveness');
-              startLiveness();
+              handleConsent(); // Go to document phase
             }}
           />
+        )}
+
+        {phase === 'document' && (
+          <motion.div
+            key="document"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="space-y-4"
+          >
+            <div className="glass-card-elevated p-6">
+              <h2 className="text-xl font-semibold mb-4">KYC: Upload Aadhaar Card</h2>
+              <p className="text-sm text-muted-foreground mb-6">
+                For banking-grade verification, please upload your Aadhaar card
+              </p>
+
+              <Input
+                type="file"
+                accept="image/*"
+                onChange={handleDocumentChange}
+                className="mb-4"
+              />
+
+              {documentPreviewUrl && (
+                <div className="space-y-4">
+                  <img src={documentPreviewUrl} alt="Document" className="w-full max-w-xs rounded border" />
+
+                  {aadhaarData && (
+                    <div className="bg-green-50 dark:bg-green-900/20 p-4 rounded border border-green-200 dark:border-green-800">
+                      <div className="flex items-center gap-2 mb-2">
+                        <CheckCircle2 className="w-5 h-5 text-green-600" />
+                        <span className="font-semibold text-green-900 dark:text-green-100">Aadhaar Detected</span>
+                      </div>
+                      <div className="text-sm text-green-800 dark:text-green-200">
+                        <div>Number: XXXX XXXX {aadhaarData.numberRaw.slice(-4)}</div>
+                        {aadhaarData.name && <div>Name: {aadhaarData.name}</div>}
+                        {aadhaarData.dob && <div>DOB: {aadhaarData.dob}</div>}
+                      </div>
+                    </div>
+                  )}
+
+                  {documentError && (
+                    <div className="bg-amber-50 dark:bg-amber-900/20 p-4 rounded border border-amber-200 dark:border-amber-800">
+                      <div className="flex items-center gap-2">
+                        <XCircle className="w-5 h-5 text-amber-600" />
+                        <span className="text-sm text-amber-900 dark:text-amber-100">{documentError}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex gap-3 mt-6">
+                <Button variant="outline" onClick={() => setPhase('consent')} className="flex-1">
+                  Back
+                </Button>
+                <Button
+                  onClick={handleDocumentContinue}
+                  className="flex-1"
+                  disabled={!documentImageData}
+                >
+                  Continue to Liveness Check
+                </Button>
+              </div>
+            </div>
+          </motion.div>
         )}
 
         {phase === 'liveness' && (
@@ -394,23 +508,23 @@ export function LivenessVerification() {
 
             {state.status === 'success' && (
               <div className="glass-card-elevated p-6">
-                <div className="text-sm font-medium text-foreground mb-4">Identity Verification</div>
+                <div className="text-sm font-medium text-foreground mb-4">Aadhaar KYC Verification</div>
 
-                {!referencePreviewUrl && (
+                {!documentImageData && (
                   <div className="text-xs text-muted-foreground">
-                    Upload a reference photo to enable identity matching.
+                    Upload Aadhaar card in the document phase to enable KYC verification.
                   </div>
                 )}
 
-                {referencePreviewUrl && matchStatus === 'running' && (
+                {documentImageData && matchStatus === 'running' && (
                   <div className="flex flex-col items-center justify-center p-8 space-y-3">
                     <RefreshCw className="w-8 h-8 text-primary animate-spin" />
-                    <div className="text-sm font-medium">Analyzing Biometric Features...</div>
-                    <div className="text-xs text-muted-foreground">Comparing facial landmarks and geometry</div>
+                    <div className="text-sm font-medium">Comparing Aadhaar Photo with Live Face...</div>
+                    <div className="text-xs text-muted-foreground">Using ONNX embeddings (YOLOv8 + ArcFace)</div>
                   </div>
                 )}
 
-                {referencePreviewUrl && matchStatus === 'done' && comparisonResult && (
+                {documentImageData && matchStatus === 'done' && comparisonResult && (
                   <div className="space-y-4">
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-1">
@@ -435,7 +549,7 @@ export function LivenessVerification() {
                           <XCircle className="w-4 h-4 text-destructive" />
                         )}
                         <span className={`text-sm font-bold ${matchPassed ? 'text-success' : 'text-destructive'}`}>
-                          {matchPassed ? 'Identity Confirmed' : 'Identity Mismatch'}
+                          {matchPassed ? 'KYC Approved' : 'KYC Failed'}
                         </span>
                       </div>
                       <p className="text-xs text-muted-foreground leading-relaxed">
@@ -444,16 +558,16 @@ export function LivenessVerification() {
                     </div>
 
                     <div className="text-[10px] text-muted-foreground flex justify-between">
-                      <span>Threshold: {(MATCH_THRESHOLD * 100).toFixed(0)}%</span>
-                      <span>Biometric Engine: Local WASM</span>
+                      <span>Threshold: 60%</span>
+                      <span>Engine: ONNX (Offline)</span>
                     </div>
                   </div>
                 )}
 
-                {referencePreviewUrl && matchStatus === 'error' && (
+                {documentImageData && matchStatus === 'error' && (
                   <div className="p-3 rounded-lg bg-destructive/5 border border-destructive/20 text-xs text-destructive">
-                    <div className="font-bold mb-1">Comparison Error</div>
-                    {matchError || 'The face comparison engine encountered an issue.'}
+                    <div className="font-bold mb-1">KYC Verification Error</div>
+                    {matchError || 'The Aadhaar comparison engine encountered an issue.'}
                   </div>
                 )}
               </div>
