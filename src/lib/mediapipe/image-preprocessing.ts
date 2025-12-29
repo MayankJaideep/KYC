@@ -94,27 +94,30 @@ export class ImagePreprocessor {
         const issues: string[] = [];
         let isGoodQuality = true;
 
-        // Blur check (threshold: 100)
-        const isBlurry = blurScore < 100;
+        // Blur check (LOWERED threshold: 50 instead of 100)
+        const isBlurry = blurScore < 50;
         if (isBlurry) {
             issues.push('Image is too blurry');
-            isGoodQuality = false;
+            // Don't fail on blur alone
+            // isGoodQuality = false;
         }
 
-        // Brightness check (acceptable range: 50-200)
-        if (brightness < 50) {
+        // Brightness check (WIDENED range: 30-220 instead of 50-200)
+        if (brightness < 30) {
             issues.push('Image is too dark');
-            isGoodQuality = false;
-        } else if (brightness > 200) {
+            // isGoodQuality = false;
+        } else if (brightness > 220) {
             issues.push('Image is too bright');
-            isGoodQuality = false;
+            // isGoodQuality = false;
         }
 
-        // Size check (minimum: 100x100)
-        if (faceSize < 100) {
+        // Size check (LOWERED minimum: 50x50 instead of 100x100)
+        if (faceSize < 50) {
             issues.push('Face is too small');
-            isGoodQuality = false;
+            isGoodQuality = false; // Only fail on very small faces
         }
+
+        console.log(`[ImagePreprocessor] Quality check: blur=${blurScore.toFixed(1)}, brightness=${brightness.toFixed(1)}, size=${faceSize}, issues=${issues.length}`);
 
         return {
             isBlurry,

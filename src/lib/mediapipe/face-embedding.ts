@@ -24,11 +24,11 @@ class FaceEmbeddingService {
     private initialized = false;
     private modelsLoaded = false;
 
-    // Optimized thresholds based on testing
+    // Similarity thresholds for face matching (LOWERED for better matching)
     private readonly SIMILARITY_THRESHOLDS = {
-        high: 0.55,      // >= 55% = high confidence match
-        medium: 0.45,    // >= 45% = medium confidence match
-        low: 0.35        // < 35% = no match
+        high: 0.35,    // >= 35% similarity = high confidence (was 0.55)
+        medium: 0.25,  // >= 25% similarity = medium confidence (was 0.45)
+        low: 0.15      // >= 15% similarity = low confidence (was 0.35)
     };
 
     /**
