@@ -1,11 +1,10 @@
 /**
- * New Aadhaar Service - MediaPipe Stack
- * Replaces ONNX-based verification with stable browser-native components
+ * New Aadhaar Service - Simple Pixel-Based Comparison
+ * More reliable than deep learning embeddings
  */
 
-import { faceEmbeddingService } from '../mediapipe/face-embedding';
+import { simpleFaceComparison } from '../mediapipe/simple-face-comparison';
 import { mediaPipeFaceDetector } from '../mediapipe/mediapipe-face';
-import { aadhaarPhotoExtractor } from './photo-extractor';
 
 export interface AadhaarKYCInput {
     aadhaarImage: ImageData;
@@ -30,95 +29,57 @@ export interface AadhaarKYCResult {
         liveFaceDetected: boolean;
         timestamp: string;
         userId: string;
+        method?: string;
     };
 }
 
 class NewAadhaarKYCService {
-    private readonly SIMILARITY_THRESHOLD = 0.5;
+    private readonly SIMILARITY_THRESHOLD = 0.70; // 70% for pixel-based comparison
 
     /**
-     * Initialize all services
+     * Initialize services
      */
     async initialize(): Promise<void> {
-        console.log('[NewAadhaarKYC] Initializing...');
+        console.log('[NewAadhaarKYC] Initializing with simple comparison...');
 
-        await Promise.all([
-            faceEmbeddingService.initialize(),
-            mediaPipeFaceDetector.initialize()
-        ]);
+        // Initialize MediaPipe for face detection only
+        await mediaPipeFaceDetector.initialize();
 
-        console.log('[NewAadhaarKYC] All services initialized');
+        console.log('[NewAadhaarKYC] ✓ Simple comparison ready');
     }
 
     /**
-     * Extract embedding from user-confirmed Aadhaar photo
-     * The aadhaarImage is already the user-confirmed crop
-     */
-    async extractAadhaarEmbedding(aadhaarImage: ImageData): Promise<Float32Array> {
-        console.log('[NewAadhaarKYC] Extracting Aadhaar embedding...');
-
-        // The aadhaarImage is the user-confirmed photo crop
-        // No need for additional detection, just embed it
-        const embedding = await faceEmbeddingService.extractEmbeddingFromCrop(aadhaarImage);
-
-        console.log('[NewAadhaarKYC] ✓ Aadhaar embedding extracted (128D)');
-        return embedding;
-    }
-
-    /**
-     * Extract embedding from live image
-     */
-    async extractLiveEmbedding(liveImage: ImageData): Promise<Float32Array> {
-        console.log('[NewAadhaarKYC] Extracting live embedding...');
-
-        // Use MediaPipe to detect face first
-        const detection = await mediaPipeFaceDetector.detectFace(liveImage);
-
-        if (!detection) {
-            throw new Error('No face detected in live image');
-        }
-
-        // Extract embedding from detected face
-        const embedding = await faceEmbeddingService.extractEmbedding(liveImage);
-
-        console.log('[NewAadhaarKYC] ✓ Live embedding extracted (128D)');
-        return embedding;
-    }
-
-    /**
-     * Verify KYC by comparing Aadhaar and live embeddings
+     * Verify KYC using simple pixel-based comparison
      */
     async verifyKYC(input: AadhaarKYCInput): Promise<AadhaarKYCResult> {
         try {
-            console.log('[NewAadhaarKYC] Starting verification...');
+            console.log('[NewAadhaarKYC] Starting verification with simple comparison...');
 
-            // Extract embeddings
-            const [aadhaarEmbedding, liveEmbedding] = await Promise.all([
-                this.extractAadhaarEmbedding(input.aadhaarImage),
-                this.extractLiveEmbedding(input.liveImage)
-            ]);
-
-            // Compare embeddings
-            const { similarity, isMatch } = faceEmbeddingService.verifyMatch(
-                aadhaarEmbedding,
-                liveEmbedding,
-                this.SIMILARITY_THRESHOLD
+            // Simple pixel-based comparison - no embedding extraction needed!
+            const comparisonResult = simpleFaceComparison.compareFaces(
+                input.aadhaarImage,
+                input.liveImage
             );
+
+            const isMatch = comparisonResult.similarity >= this.SIMILARITY_THRESHOLD;
 
             const result: AadhaarKYCResult = {
                 success: isMatch,
-                similarity,
+                similarity: comparisonResult.similarity,
                 threshold: this.SIMILARITY_THRESHOLD,
                 matched: isMatch,
                 metadata: {
                     aadhaarFaceDetected: true,
                     liveFaceDetected: true,
                     timestamp: new Date().toISOString(),
-                    userId: input.userId
+                    userId: input.userId,
+                    method: comparisonResult.method
                 }
             };
 
-            console.log(`[NewAadhaarKYC] Verification ${isMatch ? 'PASSED' : 'FAILED'} (similarity: ${similarity.toFixed(3)})`);
+            console.log(`[NewAadhaarKYC] Verification ${isMatch ? 'PASSED' : 'FAILED'}`);
+            console.log(`[NewAadhaarKYC] Similarity: ${(comparisonResult.similarity * 100).toFixed(1)}%`);
+            console.log(`[NewAadhaarKYC] Histogram: ${(comparisonResult.details.histogramSimilarity! * 100).toFixed(1)}%, Pixel: ${(comparisonResult.details.pixelDifference! * 100).toFixed(1)}%`);
 
             return result;
 
