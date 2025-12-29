@@ -1,13 +1,35 @@
 /**
- * Face Embedding & Comparison
- * Uses face-api.js (TensorFlow.js) instead of ONNX
+ * Enhanced Face Embedding & Comparison
+ * Uses face-api.js with preprocessing and quality checks
  */
 
 import * as faceapi from 'face-api.js';
+import { imagePreprocessor, type ImageQuality } from './image-preprocessing';
+
+export interface EmbeddingResult {
+    success: boolean;
+    embedding?: Float32Array;
+    quality?: ImageQuality;
+    error?: string;
+}
+
+export interface ComparisonResult {
+    similarity: number;
+    isMatch: boolean;
+    confidence: 'high' | 'medium' | 'low';
+    message: string;
+}
 
 class FaceEmbeddingService {
     private initialized = false;
     private modelsLoaded = false;
+
+    // Optimized thresholds based on testing
+    private readonly SIMILARITY_THRESHOLDS = {
+        high: 0.55,      // >= 55% = high confidence match
+        medium: 0.45,    // >= 45% = medium confidence match
+        low: 0.35        // < 35% = no match
+    };
 
     /**
      * Initialize face-api.js and load models
@@ -28,56 +50,119 @@ class FaceEmbeddingService {
 
             this.modelsLoaded = true;
             this.initialized = true;
-            console.log('[FaceEmbedding] Models loaded successfully');
+            console.log('[FaceEmbedding] ✓ Models loaded successfully');
         } catch (e) {
             console.error('[FaceEmbedding] Failed to load models:', e);
-            throw e;
+            throw new Error('Failed to initialize face recognition models');
         }
     }
 
     /**
-     * Extract 128D face embedding from image
+     * Extract 128D face embedding with quality checks
      */
-    async extractEmbedding(imageData: ImageData): Promise<Float32Array> {
+    async extractEmbedding(imageData: ImageData): Promise<EmbeddingResult> {
         if (!this.initialized) {
             await this.initialize();
         }
 
-        // Convert ImageData to canvas for face-api.js
-        const canvas = document.createElement('canvas');
-        canvas.width = imageData.width;
-        canvas.height = imageData.height;
-        const ctx = canvas.getContext('2d')!;
-        ctx.putImageData(imageData, 0, 0);
+        // Check image quality first
+        const quality = imagePreprocessor.checkQuality(imageData);
 
-        // Detect face and get descriptor
-        const detection = await faceapi
-            .detectSingleFace(canvas)
-            .withFaceLandmarks()
-            .withFaceDescriptor();
-
-        if (!detection) {
-            throw new Error('No face detected in image');
+        if (!quality.isGoodQuality) {
+            console.warn('[FaceEmbedding] Poor image quality:', quality.issues);
+            return {
+                success: false,
+                quality,
+                error: `Image quality issues: ${quality.issues.join(', ')}`
+            };
         }
 
-        // face-api.js returns a 128D Float32Array
-        return detection.descriptor;
+        try {
+            // Enhance image for better recognition
+            const enhanced = imagePreprocessor.enhanceForRecognition(imageData);
+
+            // Convert to canvas
+            const canvas = document.createElement('canvas');
+            canvas.width = enhanced.width;
+            canvas.height = enhanced.height;
+            const ctx = canvas.getContext('2d')!;
+            ctx.putImageData(enhanced, 0, 0);
+
+            // Detect face and extract descriptor
+            const detection = await faceapi
+                .detectSingleFace(canvas)
+                .withFaceLandmarks()
+                .withFaceDescriptor();
+
+            if (!detection) {
+                return {
+                    success: false,
+                    quality,
+                    error: 'No face detected in image'
+                };
+            }
+
+            console.log('[FaceEmbedding] ✓ Embedding extracted successfully');
+
+            return {
+                success: true,
+                embedding: detection.descriptor,
+                quality
+            };
+
+        } catch (error) {
+            console.error('[FaceEmbedding] Extraction failed:', error);
+            return {
+                success: false,
+                quality,
+                error: error instanceof Error ? error.message : 'Embedding extraction failed'
+            };
+        }
     }
 
     /**
-     * Extract embedding from confirmed Aadhaar photo crop
-     * (The crop is already user-confirmed, no detection needed)
+     * Compare two face embeddings with detailed results
      */
-    async extractEmbeddingFromCrop(imageData: ImageData): Promise<Float32Array> {
-        // For Aadhaar, we can skip detection and just extract the embedding
-        // because the user already confirmed the crop is their face
-        return this.extractEmbedding(imageData);
+    async compareEmbeddings(
+        embedding1: Float32Array,
+        embedding2: Float32Array
+    ): Promise<ComparisonResult> {
+        const similarity = this.calculateCosineSimilarity(embedding1, embedding2);
+
+        let isMatch = false;
+        let confidence: 'high' | 'medium' | 'low' = 'low';
+        let message = '';
+
+        if (similarity >= this.SIMILARITY_THRESHOLDS.high) {
+            isMatch = true;
+            confidence = 'high';
+            message = 'Strong match - faces are very similar';
+        } else if (similarity >= this.SIMILARITY_THRESHOLDS.medium) {
+            isMatch = true;
+            confidence = 'medium';
+            message = 'Moderate match - faces appear to be the same person';
+        } else if (similarity >= this.SIMILARITY_THRESHOLDS.low) {
+            isMatch = false;
+            confidence = 'low';
+            message = 'Weak similarity - manual review recommended';
+        } else {
+            isMatch = false;
+            confidence = 'low';
+            message = 'No match - faces are different people';
+        }
+
+        console.log(`[FaceEmbedding] Similarity: ${(similarity * 100).toFixed(1)}%, Match: ${isMatch}, Confidence: ${confidence}`);
+
+        return { similarity, isMatch, confidence, message };
     }
 
     /**
-     * Compare two face embeddings using cosine similarity
+     * Calculate cosine similarity between embeddings
      */
-    cosineSimilarity(embedding1: Float32Array, embedding2: Float32Array): number {
+    private calculateCosineSimilarity(
+        embedding1: Float32Array,
+        embedding2: Float32Array
+    ): number {
         if (embedding1.length !== embedding2.length) {
             throw new Error('Embeddings must have the same length');
         }
@@ -103,18 +188,22 @@ class FaceEmbeddingService {
     }
 
     /**
-     * Verify if two faces match
-     * Returns similarity score and boolean match result
+     * Legacy method for backward compatibility
+     */
+    cosineSimilarity(embedding1: Float32Array, embedding2: Float32Array): number {
+        return this.calculateCosineSimilarity(embedding1, embedding2);
+    }
+
+    /**
+     * Legacy method for backward compatibility
      */
     verifyMatch(
         aadhaarEmbedding: Float32Array,
         liveEmbedding: Float32Array,
         threshold: number = 0.5
     ): { similarity: number; isMatch: boolean } {
-        const similarity = this.cosineSimilarity(aadhaarEmbedding, liveEmbedding);
+        const similarity = this.calculateCosineSimilarity(aadhaarEmbedding, liveEmbedding);
         const isMatch = similarity >= threshold;
-
-        console.log(`[FaceEmbedding] Similarity: ${similarity.toFixed(3)}, Threshold: ${threshold}, Match: ${isMatch}`);
 
         return { similarity, isMatch };
     }
